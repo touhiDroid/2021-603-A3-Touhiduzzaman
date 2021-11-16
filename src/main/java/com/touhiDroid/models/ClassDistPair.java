@@ -13,7 +13,7 @@ public class ClassDistPair implements Writable {
     private final FloatWritable distance;
 
     public ClassDistPair() {
-        this.classValue = new IntWritable(0);
+        this.classValue = new IntWritable(-1);
         this.distance = new FloatWritable(Float.MAX_VALUE);
     }
 
