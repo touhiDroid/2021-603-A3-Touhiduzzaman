@@ -54,4 +54,12 @@ public class ClassDistPair implements Writable {
         classValue.readFields(dataInput);
         distance.readFields(dataInput);
     }
+
+    @Override
+    public String toString() {
+        return "ClassDistPair{" +
+                "class=" + classValue +
+                ", distance=" + distance +
+                '}';
+    }
 }

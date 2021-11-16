@@ -58,7 +58,7 @@ public class PredictionsWritable implements Writable {
     @Override
     public String toString() {
         int size = this.predictions.size();
-        StringBuilder s = new StringBuilder("PredictionsWritable{ predictions{size=" + size + "} = ");
+        StringBuilder s = new StringBuilder("PredictionsWritable{ predictions { size=" + size + " } = ");
         for (IntWritable prediction : this.predictions) {
             s.append(prediction.get()).append(", ");
         }

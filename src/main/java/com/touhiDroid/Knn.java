@@ -2,7 +2,6 @@ package com.touhiDroid;
 
 import com.touhiDroid.models.ClassDistPair;
 import com.touhiDroid.models.ListOfClassDistPairList;
-import com.touhiDroid.models.PredictionsWritable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
@@ -24,9 +23,9 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 public class Knn {
+    private static final boolean toPrintDebugInfo = false;
     private static final int k = 3;
     private static ArrayList<List<Float>> testDataSet;
-    private static Map<Integer, Integer> classVoteMap;
     /**
      * contains the count combined as 1-class-value & (numAttrs-1) features
      */
@@ -34,7 +33,6 @@ public class Knn {
 
     public static void main(String[] args) throws IOException, InterruptedException, ClassNotFoundException {
         // args: 0->train, 1->test, 2->out
-        classVoteMap = new HashMap<>();
         readTestData(args[1]);
 
         long startTimeMs = System.currentTimeMillis();
@@ -47,7 +45,7 @@ public class Knn {
         long deltaMinutes = delta / 1000 / 60;
         float deltaSeconds = delta / 1000.0f - deltaMinutes * 60.0f;
         // print accuracy   -> done as the last action of the single reducer
-        p("Total Time required: " + deltaMinutes + " minutes & " + deltaSeconds + "seconds");
+        p("Total Time required: " + deltaMinutes + " minutes & " + deltaSeconds + "seconds", true);
     }
 
     private static Job setupKnnJob(String[] args) throws IOException {
@@ -100,28 +98,39 @@ public class Knn {
     }
 
     static void p(String msg) {
-        System.out.println(msg);
+        p(msg, false);
     }
 
-    private static class KnnReducer extends Reducer<Object, ListOfClassDistPairList, Object, PredictionsWritable> {
+    static void p(String msg, boolean mustPrint) {
+        if (toPrintDebugInfo || mustPrint)
+            System.out.println(msg);
+    }
+
+    private static class KnnReducer extends Reducer<Object, ListOfClassDistPairList, Object, IntWritable> {
+        private List<List<ClassDistPair>> cdReducer;
+        private int testInstCount = 0;
+
+        @Override
+        protected void setup(Context context) throws IOException, InterruptedException {
+            super.setup(context);
+
+            testInstCount = testDataSet.size();
+            cdReducer = new ArrayList<>();
+            for (int i = 0; i < testInstCount; i++) {
+                List<ClassDistPair> cdTemp = new ArrayList<>();
+                for (int n = 0; n < k; n++)
+                    cdTemp.add(new ClassDistPair(-1, Float.MAX_VALUE));
+                cdReducer.add(cdTemp);
+            }
+            p("KnnReducer() -> CDReducer init. with size = " + cdReducer.size());
+            p("KnnReducer() -> Test Instance Count = " + testInstCount);
+        }
 
         @Override
         protected void reduce(Object key, Iterable<ListOfClassDistPairList> itCDj, Context context)
                 throws IOException, InterruptedException {
-            int testInstCount = testDataSet.size();
-            p("KnnReducer.reduce() -> Test Instance Count = " + testInstCount);
             // List<List<MapOut>> cdj = new ArrayList<>();
             // for (List<List<MapOut>> list : itCDj) cdj.addAll(list); // all mapper outputs are merged into one CDj
-
-            List<List<ClassDistPair>> cdReducer = new ArrayList<>();
-            for (int i = 0; i < testInstCount; i++) {
-                List<ClassDistPair> cdTemp = new ArrayList<>();
-                for (int n = 0; n < k; n++)
-                    cdTemp.add(new ClassDistPair(0, Float.MAX_VALUE));
-                cdReducer.add(cdTemp);
-            }
-            p("KnnReducer.reduce() -> CDReducer init. with size = " + cdReducer.size());
-
 
             /* ** Reduce Operation : reducing all cdj into one cdReducer ** */
             for (ListOfClassDistPairList cdjObj : itCDj) {
@@ -129,31 +138,48 @@ public class Knn {
                 for (int i = 0; i < testInstCount; i++) {
                     int cont = 0;
                     for (int n = 0; n < k; n++) {
-                        if (cdj.get(i).get(cont).getDistance() < cdReducer.get(i).get(n).getDistance()) {
+                        float d = cdj.get(i).get(cont).getDistance();
+                        float d2 = cdReducer.get(i).get(n).getDistance();
+                        if (d < d2) {
+                            String inStr = i + ", " + n;
+                            p("Updating distance (" + inStr + ") = " + d
+                                    + " --- vs cdReducer(" + inStr + ") = " + d2
+                                    + ", class=" + cdReducer.get(i).get(n).getClassValue());
                             cdReducer.get(i).set(n, cdj.get(i).get(cont));
                             cont++;
                         }
                     }
                 }
             }
+        }
+
+        @Override
+        protected void cleanup(Context context) throws IOException, InterruptedException {
+            super.cleanup(context);
             /* ** Reduce cleanup ** */
             int correctPredictions = 0;
-            IntWritable[] predictedClasses = new IntWritable[testInstCount];
+            // IntWritable[] predictedClasses = new IntWritable[testInstCount];
             for (int i = 0; i < testInstCount; i++) {
                 // feeding majorityVoting() all k-NNs for the i'th case to get the predicted-class
-                predictedClasses[i] = new IntWritable(majorityVoting(cdReducer.get(i)));
+                List<ClassDistPair> kNNs = cdReducer.get(i);
+                int predictedClass = majorityVoting(kNNs);
+                p("Voting for test#" + i + ": cdReducer[0,1,2] = ["
+                        + kNNs.get(0) + ", " + kNNs.get(1) + ", " + kNNs.get(2) + "] -> " + predictedClass);
+                context.write(i, new IntWritable(predictedClass));
+
+                // for accuracy computation
                 int originalClass = testDataSet.get(i).get(numAttrs - 1).intValue();
-                if (predictedClasses[i].get() == originalClass)
+                if (predictedClass == originalClass)
                     correctPredictions++;
             }
             p("Correct Predictions: " + correctPredictions
                     + ", Total Test Cases: " + testInstCount
-                    + ", Accuracy: " + ((correctPredictions * 100) / testInstCount) + "%\n");
-            context.write(key, new PredictionsWritable(predictedClasses));
+                    + ", Accuracy: " + ((correctPredictions * 100.0) / (testInstCount * 1.0)) + "%\n", true);
         }
 
-        private Integer majorityVoting(List<ClassDistPair> reducedKNeighbourList) {
+        private int majorityVoting(List<ClassDistPair> reducedKNeighbourList) {
             // voting on class by k-NNs
+            Map<Integer, Integer> classVoteMap = new HashMap<>();
             for (ClassDistPair n : reducedKNeighbourList) {
                 classVoteMap.put(n.getClassValue(), classVoteMap.getOrDefault(n.getClassValue(), 0) + 1);
             }
@@ -167,8 +193,6 @@ public class Knn {
             }
             return predictedClass;
         }
-
-
     }
 
     private static class KnnMapper extends Mapper<Object, Text, Object, ListOfClassDistPairList> {
@@ -195,17 +219,6 @@ public class Knn {
                 for (int j = 0; i < trainTokens.length && j < numAttrs; j++, i++)
                     try {
                         trCase.add(Float.parseFloat(trainTokens[i]));
-                        if (j == numAttrs - 1) { // -> got a class, so mapping it for vote-counting in latter phases
-                            int c;
-                            try {
-                                c = Integer.parseInt(trainTokens[i]);
-                            } catch (NumberFormatException nfe) {
-                                nfe.printStackTrace();
-                                c = 0;
-                            }
-                            // if (!classVoteMap.containsKey(c))
-                            classVoteMap.put(c, 0);
-                        }
                     } catch (NumberFormatException nfe) {
                         nfe.printStackTrace();
                     }
