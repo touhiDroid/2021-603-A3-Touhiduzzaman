@@ -1,6 +1,0 @@
-com/touhiDroid/Knn$KnnMapper.class
-com/touhiDroid/Knn$KnnReducer.class
-com/touhiDroid/models/ListOfClassDistPairList.class
-com/touhiDroid/models/PredictionsWritable.class
-com/touhiDroid/Knn.class
-com/touhiDroid/models/ClassDistPair.class
