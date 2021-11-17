@@ -3,10 +3,16 @@ package com.touhiDroid;
 import com.touhiDroid.models.ClassDistPair;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
+import org.apache.spark.api.java.JavaDoubleRDD;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.mllib.regression.LabeledPoint;
 import org.apache.spark.mllib.util.MLUtils;
+import scala.Tuple2;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,7 +34,8 @@ public class Knn {
         JavaRDD<LabeledPoint> trainingData = MLUtils.loadLibSVMFile(sc, args[0]).toJavaRDD();
         JavaRDD<LabeledPoint> testData = MLUtils.loadLibSVMFile(sc, args[1]).toJavaRDD();
 
-        trainingData.mapPartitions(
+        // map as ( #test_num => { /* k number of ClassDist pairs */ } )
+        JavaRDD<Map.Entry<Integer, List<ClassDistPair>>> testKnnPredictions = trainingData.mapPartitions(
                 (FlatMapFunction<Iterator<LabeledPoint>, Map.Entry<Integer, List<ClassDistPair>>>) labeledPointIterator -> {
                     // Algo-1 : Map function
                     List<LabeledPoint> trainSubSetJ = new ArrayList<>();
@@ -45,7 +52,18 @@ public class Knn {
                     });
                     return resultJ.entrySet().iterator();
                 });
+        JavaRDD<Object> map = testKnnPredictions.map(new Function<Map.Entry<Integer, List<ClassDistPair>>, Object>() {
+            @Override
+            public Object call(Map.Entry<Integer, List<ClassDistPair>> v1) throws Exception {
+                return null;
+            }
+        });
 
+        /*JavaPairRDD<String, Integer> results = map.reduce(new Function2<Integer, Integer, Integer>() {
+            public Integer call(Integer a, Integer b) { return a + b; }
+        });*/
+
+        map.saveAsTextFile(args[2]);
 
         long endTimeMs = System.currentTimeMillis();
         long delta = endTimeMs - startTimeMs;
